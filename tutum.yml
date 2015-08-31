@@ -1,0 +1,9 @@
+jenkins:
+  image: quay.io/alaska/jenkins
+  ports:
+    - 80:8080
+    - 50000:50000
+  dns: 8.8.8.8
+  volumes:
+    - /srv/docker/jenkins/data:/var/jenkins_home
+  
