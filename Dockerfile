@@ -1,51 +1,27 @@
-FROM java:8u45-jdk
+FROM jenkins
+MAINTAINER Owen Ouyang <owen.ouyang@live.com>
 
-RUN apt-get update && apt-get install -y wget git curl zip && rm -rf /var/lib/apt/lists/*
+# Switch user to root so that we can install apps (jenkins image switches to user "jenkins" in the end)
+USER root
 
-ENV JENKINS_HOME /var/jenkins_home
+# Install Docker prerequisites
+RUN apt-get update -qq && apt-get install -qqy \
+    apt-transport-https \
+    ca-certificates \
+	lxc \
+	supervisor
 
-# Jenkins is ran with user `jenkins`, uid = 1000
-# If you bind mount a volume from host/vloume from a data container, 
-# ensure you use same uid
-RUN useradd -d "$JENKINS_HOME" -u 1000 -m -s /bin/bash jenkins
+# Create log folder for supervisor, jenkins and docker
+RUN mkdir -p /var/log/supervisor
+RUN mkdir -p /var/log/docker
+RUN mkdir -p /var/log/jenkins
 
-# Jenkins home directoy is a volume, so configuration and build history 
-# can be persisted and survive image upgrades
-VOLUME /var/jenkins_home
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# `/usr/share/jenkins/ref/` contains all reference configuration we want 
-# to set on a fresh new installation. Use it to bundle additional plugins 
-# or config file with your custom jenkins Docker image.
-RUN mkdir -p /usr/share/jenkins/ref/init.groovy.d
+# Install Docker from Docker Inc. repositories.
+RUN echo deb https://get.docker.io/ubuntu docker main > /etc/apt/sources.list.d/docker.list \
+  && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9 \
+  && apt-get update -qq \
+  && apt-get install -qqy lxc-docker
 
-# Use tini as subreaper in Docker container to adopt zombie processes 
-RUN curl -fL https://github.com/krallin/tini/releases/download/v0.5.0/tini-static -o /bin/tini && chmod +x /bin/tini
-
-COPY init.groovy /usr/share/jenkins/ref/init.groovy.d/tcp-slave-agent-port.groovy
-
-ENV JENKINS_VERSION 1.609.2
-ENV JENKINS_SHA 59215da16f9f8a781d185dde683c05fcf11450ef
-
-# could use ADD but this one does not check Last-Modified header 
-# see https://github.com/docker/docker/issues/8331
-RUN curl -fL http://mirrors.jenkins-ci.org/war-stable/$JENKINS_VERSION/jenkins.war -o /usr/share/jenkins/jenkins.war \
-  && echo "$JENKINS_SHA /usr/share/jenkins/jenkins.war" | sha1sum -c -
-
-ENV JENKINS_UC https://updates.jenkins-ci.org
-RUN chown -R jenkins "$JENKINS_HOME" /usr/share/jenkins/ref
-
-# for main web interface:
-EXPOSE 8080
-
-# will be used by attached slave agents:
-EXPOSE 50000
-
-ENV COPY_REFERENCE_FILE_LOG $JENKINS_HOME/copy_reference_file.log
-
-USER jenkins
-
-COPY jenkins.sh /usr/local/bin/jenkins.sh
-ENTRYPOINT ["/bin/tini", "--", "/usr/local/bin/jenkins.sh"]
-
-# from a derived Dockerfile, can use `RUN plugin.sh active.txt` to setup /usr/share/jenkins/ref/plugins from a support bundle
-COPY plugins.sh /usr/local/bin/plugins.sh
+CMD /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
